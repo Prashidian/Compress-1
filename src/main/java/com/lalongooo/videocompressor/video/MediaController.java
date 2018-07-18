@@ -20,7 +20,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 
-@SuppressLint("NewApi") public class MediaController {
+@SuppressLint("NewApi")
+public class MediaController {
 
     public final static String MIME_TYPE = "video/avc";
     private final static int PROCESSOR_TYPE_OTHER = 0;
@@ -256,67 +257,85 @@ import java.nio.ByteBuffer;
     }
 
     @TargetApi(16)
-    public boolean convertVideo(final String path, String savePath, long mEndTime) {
+    public boolean convertVideo(final String path, String savePath) {
+
+        File inputFile = new File(path);
+        if (inputFile == null) {
+            return false;
+        }
 
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         retriever.setDataSource(path);
-        String width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT);
-        String height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
+        String height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT);
+        String width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
         String rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+        String strDuration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
 
-        int videoWidth = 641;
-        int videoHeight = 361;
-        try {
-            MediaMetadataRetriever re = new MediaMetadataRetriever();
-            Bitmap bmp = null;
-            re.setDataSource(path);
-            bmp = retriever.getFrameAtTime();
-            if (bmp == null) {
-                return false;
-            }
-            videoHeight = bmp.getHeight();
-            videoWidth = bmp.getWidth();
-        } catch (IllegalArgumentException e) {
-            e.printStackTrace();
+        long duration = 1;
+
+        if (strDuration != null) {
+            duration = Long.valueOf(strDuration);
         }
 
-        long startTime = -1;
-        long endTime = -1;
+
+        int frameWidth = 0, frameHeight = 0;
+
+        if (width != null) {
+            frameWidth = Integer.valueOf(width);
+        }
+
+        if (height != null) {
+            frameHeight = Integer.valueOf(height);
+        }
+
+        if (frameWidth == 0 || frameHeight == 0) {
+            try {
+                Bitmap bmp = retriever.getFrameAtTime();
+                if (bmp == null) {
+                    return false;
+                }
+                frameWidth = bmp.getWidth();
+                frameHeight = bmp.getHeight();
+
+            } catch (IllegalArgumentException e) {
+                e.printStackTrace();
+            }
+        }
 
         int resultWidth;
         int resultHeight;
+        int maxSize;
 
-        if (videoWidth * videoHeight < 307200) {
-            //resultWidth = videoWidth;
-            //resultHeight = videoHeight;
+        if (frameWidth > frameHeight) {
+            maxSize = frameWidth;
+            resultWidth = Math.min(640, frameWidth);
+            resultHeight = (resultWidth * frameHeight) / frameWidth;
+        } else {
+            maxSize = frameHeight;
+            resultHeight = Math.min(640, frameHeight);
+            resultWidth = (resultHeight * frameWidth) / frameHeight;
+        }
 
+
+        if (duration > 1 && maxSize <= 640 && (inputFile.length() / duration < 200)) {
             try {
                 copyFile(new File(path), new File(savePath));
             } catch (IOException e) {
                 e.printStackTrace();
             }
             return true;
-        } else {
-            resultWidth = 640;
-            resultHeight = 360;
         }
 
-        int rotationValue = Integer.valueOf(rotation);
-        int originalWidth = Integer.valueOf(width);
-        int originalHeight = Integer.valueOf(height);
 
-        int bitrate = 921600; //450000;
+        long startTime = -1;
+        long endTime = -1;
+        int rotationValue = Integer.valueOf(rotation);
+        int bitrate = resultWidth * resultHeight * 2;
         int rotateRender = 0;
 
         File cacheFile = new File(savePath);
-        //                Environment.getExternalStorageDirectory()
-        //                        + File.separator
-        //                        + Config.VIDEO_COMPRESSOR_APPLICATION_DIR_NAME
-        //                        + Config.VIDEO_COMPRESSOR_COMPRESSED_VIDEOS_DIR,
-        //                "VIDEO_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + ".mp4"
-        //        );
 
-        if (Build.VERSION.SDK_INT < 18 && resultHeight > resultWidth && resultWidth != originalWidth && resultHeight != originalHeight) {
+        if (Build.VERSION.SDK_INT < 18 && resultHeight > resultWidth && resultWidth != frameWidth && resultHeight != frameHeight) {
             int temp = resultHeight;
             resultHeight = resultWidth;
             resultWidth = temp;
@@ -341,7 +360,7 @@ import java.nio.ByteBuffer;
             }
         }
 
-        File inputFile = new File(path);
+
         if (!inputFile.canRead()) {
             didWriteData(true, true);
             return false;
@@ -351,7 +370,6 @@ import java.nio.ByteBuffer;
         boolean error = false;
         long videoStartTime = startTime;
 
-        long time = System.currentTimeMillis();
 
         if (resultWidth != 0 && resultHeight != 0) {
             MP4Builder mediaMuxer = null;
@@ -367,7 +385,7 @@ import java.nio.ByteBuffer;
                 extractor = new MediaExtractor();
                 extractor.setDataSource(inputFile.toString());
 
-                if (resultWidth != originalWidth || resultHeight != originalHeight || rotateRender != 0) {
+                if (resultWidth != frameWidth || resultHeight != frameHeight || rotateRender != 0) {
                     int videoIndex;
                     videoIndex = selectTrack(extractor, false);
                     if (videoIndex >= 0) {
@@ -456,9 +474,9 @@ import java.nio.ByteBuffer;
 
                             MediaFormat outputFormat = MediaFormat.createVideoFormat(MIME_TYPE, resultWidth, resultHeight);
                             outputFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat);
-                            outputFormat.setInteger(MediaFormat.KEY_BIT_RATE, bitrate > 0 ? bitrate : 921600);
-                            outputFormat.setInteger(MediaFormat.KEY_FRAME_RATE, 25);
-                            outputFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 10);
+                            outputFormat.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
+                            outputFormat.setInteger(MediaFormat.KEY_FRAME_RATE, 15);
+                            outputFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
                             if (Build.VERSION.SDK_INT < 18) {
                                 outputFormat.setInteger("stride", resultWidth + 32);
                                 outputFormat.setInteger("slice-height", resultHeight);
@@ -642,9 +660,10 @@ import java.nio.ByteBuffer;
                                                         inputSurface.setPresentationTime(info.presentationTimeUs * 1000);
                                                         inputSurface.swapBuffers();
                                                         long p = info.presentationTimeUs / 1000;
-                                                        long percent = ((p * 100) / mEndTime);
+                                                        long percent = ((p * 100) / duration);
 
-                                                        if (onPercentCompress != null) onPercentCompress.compress(percent, savePath);
+                                                        if (onPercentCompress != null)
+                                                            onPercentCompress.compress(percent, savePath);
                                                     } else {
                                                         int inputBufIndex = encoder.dequeueInputBuffer(TIMEOUT_USEC);
                                                         if (inputBufIndex >= 0) {
